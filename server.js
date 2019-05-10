@@ -4,8 +4,10 @@ const axios = require('axios');
 const bunyan = require('bunyan');
 const jwt = require('jsonwebtoken');
 const {scenarios,generateNccoMap} = require('./test_ncco_build');
-
 const logger = bunyan.createLogger({name: 'myapp'});
+const dataService = require('./data_service')();
+const csClient = require('./cs_client')({logger})
+
 
 
 
@@ -18,13 +20,19 @@ const forwardNexmoReq = res => promise => {
     .then(({data,statusCode}) => {
       return res.json({data,statusCode})
     })
-    .catch(({response}) => {
-
+    .catch((error) => {
+      logger.warn(error)
+      const {response} = error
       const {data,status} = response
       res.statusCode = status;
       return res.json(data)
     })
 }
+
+
+
+
+
 
 function createApp(config){
 
@@ -77,6 +85,66 @@ function createApp(config){
   })
 
 
+
+  app.post('/login', (req, res) => {
+    const {user_name, password} = req.body;
+    if(!user_name || !password){
+      res.status(404)
+      return res.json({"msg": "missing user_name or password"});
+    }
+
+    const TOKEN_BE = generateBEToken({config})
+
+    const loginProcess = () => Promise.resolve()
+      .then(() => {
+        if (!dataService.hasUsers() ) {
+          return csClient.getUsers({
+            token: TOKEN_BE
+          })
+          .then(({data}) => {
+            dataService.setUsers(data)
+            return undefined;
+          })
+        }
+        return undefined;
+
+      })
+      .then(() => {
+        return dataService.getUser({name: user_name})
+      })
+      .catch(() => {
+        return csClient.createUser({
+          data:{
+            name: user_name
+          },
+          token: TOKEN_BE
+        })
+        .then(() => {
+          return dataService.getUser({name: user_name})
+        })
+      })
+      .then((user) => {
+        res.json({
+          user
+        })
+      })
+      .catch((error) => {
+        const {response} = error
+        if(response){
+          const {data,status} = response
+          res.status(status)
+          res.json(data)
+        }
+        res.status(500)
+        res.json({error})
+      })
+
+
+
+    return loginProcess()
+  })
+
+
   app.post('/voiceEvent', (req, res) => res.json({body: req.body}))
 
   app.post('/calls', (req, res) => {
@@ -111,32 +179,45 @@ function createApp(config){
     logger.info({step_1_pre: step_1})
     if(step_1 === null || step_1 === undefined || step_1 === "" ){
       step_1 = -1
+    } if (step_1 === "redirect"){
+      step_1 = "redirect";
     } else {
       step_1 = parseInt(step_1)
     }
 
     logger.info({step_1: step_1})
 
-    const nccoMap = generateNccoMap(scenarios, {server_url})
+    const conversation_name = `nexmo_conversation__${to}___${from}`
 
-    let currentNcco=null
-    if(step_1 === -1 && dtmf === -1)
-      currentNcco = nccoMap.child.ncco;
-    if(step_1 === -1 && dtmf !== -1)
+    const nccoMap = generateNccoMap(conversation_name, scenarios, {server_url})
+
+    let currentNcco = null
+    if(step_1 === "redirect"){
+      currentNcco = [
+        {
+          "action": "conversation",
+          "name": `${conversation_name}`,
+          "eventUrl": [`${server_url}/ncco`],
+
+        },
+      ]
+    } else if(step_1 === -1 && dtmf === -1) {
+        currentNcco = nccoMap.child.ncco;
+    } else if(step_1 === -1 && dtmf !== -1){
       currentNcco = nccoMap.child.children[dtmf - 1].ncco;
-    if(step_1 !== -1 && dtmf !== -1)
-      currentNcco = nccoMap.child.children[step_1].children[dtmf -1 ];
+    } else if(step_1 !== -1 && dtmf !== -1) {
+      currentNcco = nccoMap.child.children[step_1] && nccoMap.child.children[step_1].children[dtmf -1 ];
+    }
 
-    if(currentNcco !== null)
+  if(currentNcco !== null){
       return res.json(currentNcco);
-    else {
-      res.status = 400
+    } else {
+      res.status(400)
       return res.json({msg:"wrong ncco request"})
 
     }
 
   }
-
 
   app.get('/ncco', nccoHandler)
   app.get('/ncco/:step_1', nccoHandler)
@@ -170,7 +251,7 @@ function localDevSetup({config}){
               "voice": {
                   "webhooks": {
                       "answer_url": {
-                          "address":`${ngrok_url}/ncco`,
+                          "address":`${ngrok_url}/ncco/redirect`,
                           "http_method":"GET"
                       },
                       "event_url": {
@@ -202,27 +283,51 @@ function localDevSetup({config}){
     }))
 }
 
-function generateBEToken({config}){
+function generateToken({private_key, application_id, acl, sub}){
+  if(!acl) {
+    acl = {
+      "paths": {
+        "/**": {}
+      }
+    }
+  }
+
+  const props = {
+    "iat": 1556839380,
+    "nbf": 1556839380,
+    "exp": 1559839410,
+    "jti": 1556839410008,
+    application_id,
+    acl,
+    sub
+  }
+
   return jwt.sign(
+    props,
     {
-      "iat": 1556839380,
-    	"nbf": 1556839380,
-    	"exp": 1559839410,
-    	"jti": 1556839410008,
-    	"application_id": config.application_id,
-    	"acl": {
-    		"paths": {
-    			"/**": {}
-    		}
-    	}
-    },
-    {
-      key: config.private_key,
+      key: private_key,
     },
     {
       algorithm: 'RS256',
     }
   )
+}
+
+function generateUserToken({config, user_name}){
+  const {private_key, application_id} = config;
+  return generateToken({
+    	private_key,
+      application_id,
+      sub: user_name
+    })
+}
+
+function generateBEToken({config}){
+  const {private_key, application_id} = config;
+  return generateToken({
+    	private_key,
+      application_id
+    })
 }
 
 function getStaticConfig(env){

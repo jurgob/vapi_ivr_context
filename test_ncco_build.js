@@ -1,39 +1,3 @@
-// function getIvROptions(){
-//   return {
-//     root:{
-//       ncco: [
-//         {
-//             "action": "talk",
-//             "text": "Welcome to our nexmo iterative questionary",
-//             "voiceName": "Amy",
-//             "bargeIn": false
-//         },
-//         {
-//             "action": "talk",
-//             "text": "What's your favourite food?",
-//             "voiceName": "Amy",
-//             "bargeIn": true
-//         },
-//         {
-//             "action": "talk",
-//             "text": "1 Pizza, 2 Sandwiches, 3 Fruits",
-//             "voiceName": "Amy",
-//             "bargeIn": true
-//         },
-//         {
-//           "action": "input",
-//           "eventUrl": [`${server_url}/ncco_1`]
-//         }
-//       ],
-//       options:{
-//         "step1":{
-//           ncco:[]
-//         }
-//       }
-//     }
-//   }
-// }
-
 function defaultHistory(){
   const choicesItemsLeaf = {
     "1":{
@@ -123,55 +87,57 @@ const scenarios = {
     ]
 }
 
-function generateSingleNCCO(text, options, next_ncco_url){
+function generateSingleNCCO(conversation_name, text, options, next_ncco_url){
   return [
     {
         "action": "talk",
         "text": `${text}`,
         "voiceName": "Amy",
-        "bargeIn": false
+        "bargeIn": true
     },
     {
         "action": "talk",
         "text": `${options.map(opt => opt.option_text).join(", ")}`,
         "voiceName": "Amy",
-        "bargeIn": false
+        "bargeIn": true
     },
     {
-    "action": "input",
+      "action": "input",
       "eventUrl": [next_ncco_url],
       "eventMethod": "GET"
     }
   ]
 }
 
-function generateLeafNCCO(text){
+function generateLeafNCCO(conversation_name, text){
   return [
     {
         "action": "talk",
         "text": `${text}`,
         "voiceName": "Amy",
-        "bargeIn": false
+        "bargeIn": true
     }
 
   ]
 }
 
 
-function generateNccoMap(scenarios, config){
+function generateNccoMap(conversation_name, scenarios, config){
   const {server_url} = config
+
   const ncco_map ={}
   const step1_options = scenarios.options
 
+
   ncco_map["child"] = {
-    ncco:generateSingleNCCO(scenarios.text, scenarios.options, `${server_url}/ncco`),
+    ncco:generateSingleNCCO(conversation_name, scenarios.text, scenarios.options, `${server_url}/ncco`),
     children:[]
   }
 
   scenarios.options.forEach((opt, idx ) => {
     ncco_map['child'].children[idx] = {
-      ncco: generateSingleNCCO(opt.text, opt.options, `${server_url}/ncco/0`),
-      children: opt.options.map( ({text}) => generateLeafNCCO(text) )
+      ncco: generateSingleNCCO(conversation_name, opt.text, opt.options, `${server_url}/ncco/0`),
+      children: opt.options.map( ({text}) => generateLeafNCCO(conversation_name, text) )
     }
   })
 
@@ -188,4 +154,4 @@ module.exports = {
   scenarios
 }
 // print(defaultHistory())
-print(generateNccoMap(scenarios, {server_url: "http://server_url.com"}));
+// print(generateNccoMap(scenarios, {server_url: "http://server_url.com"}));

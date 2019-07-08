@@ -17,8 +17,8 @@ var bodyParser = require('body-parser');
 const forwardNexmoReq = res => promise => {
 
   return promise
-    .then(({data,statusCode}) => {
-      return res.json({data,statusCode})
+    .then(({data,statusCode, headers}) => {
+      return res.json({data,statusCode, headers})
     })
     .catch((error) => {
       logger.warn(error)
@@ -42,7 +42,7 @@ function createApp(config){
 
   app.use((req, res, next) => {
     const {query,baseUrl,originalUrl, url, method, statusCode, body} = req
-    logger.info( {query,baseUrl,originalUrl, url, method, statusCode, body} , "Request Logger:: ")
+    logger.info( {query,baseUrl,originalUrl, url, method, statusCode, body} , "Request Logger:")
     next()
   })
 
@@ -50,6 +50,7 @@ function createApp(config){
 
   app.get('/conversations', (req, res) => {
     const TOKEN_BE = generateBEToken({config})
+    console.log('TOKEN_BE', TOKEN_BE)
     return forwardNexmoReq(res)(axios({
       method:"GET",
       url:"https://api.nexmo.com/beta/conversations",
@@ -145,7 +146,33 @@ function createApp(config){
   })
 
 
-  app.post('/voiceEvent', (req, res) => res.json({body: req.body}))
+  app.post('/voiceEvent', (req, res) => {
+      console.log(`req.body`, req.body)
+      if(req.body.type === 'transfer') {
+        const {server_url} = config;
+        const conversation_name = req.body.conversation_uuid_to;
+        const nccoMap = generateNccoMap(conversation_name, scenarios, {server_url})
+        const currentNcco = nccoMap.child.ncco
+        const TOKEN_BE = generateBEToken({config})
+        const request = {
+          method: "PUT",
+          url: `http://vapp1.wdc4.internal:5210/v1/conversations/${conversation_name}/ncco`,
+          data: currentNcco,
+          headers: {'Authorization': `bearer ${TOKEN_BE}`}
+        }
+        logger.info({request}, `NCCO UPDATE START!`)
+        axios(request)
+        .then(({data,status}) => {
+          logger.info({data, status}, `NCCO UPDATE SUCCESS!`)
+        })
+        .catch((err) => {
+          const {data, status} = err
+          logger.error({err}, `NCCO UPDATE FAILED!`)
+        })
+
+      }
+    res.json({body: req.body})
+  })
 
   app.post('/calls', (req, res) => {
     const TOKEN_BE = generateBEToken({config})
@@ -171,12 +198,10 @@ function createApp(config){
 
   const nccoHandler = (req, res) => {
     const {server_url} = config;
-    let {step_1} = req.params;
-    const {to='unknown', from='unknown', dtmf = -1 } = req.query;
-
-    logger.info({dtmf: dtmf})
-
-    logger.info({step_1_pre: step_1})
+    let {originalUrl, params, query} = req;
+    let {step_1} = params;
+    const {to='unknown', from='unknown', dtmf = -1 } = query;
+    
     if(step_1 === null || step_1 === undefined || step_1 === "" ){
       step_1 = -1
     } if (step_1 === "redirect"){
@@ -184,8 +209,8 @@ function createApp(config){
     } else {
       step_1 = parseInt(step_1)
     }
-
-    logger.info({step_1: step_1})
+    
+    logger.info({dtmf: dtmf, step_1_pre: step_1}, "ncco handler: ")
 
     const conversation_name = `nexmo_conversation__${to}___${from}`
 
@@ -195,10 +220,12 @@ function createApp(config){
     if(step_1 === "redirect"){
       currentNcco = [
         {
+          "action": "talk",
+          "text": "we are transfering you in a better place"
+        },
+        {
           "action": "conversation",
-          "name": `${conversation_name}`,
-          "eventUrl": [`${server_url}/ncco`],
-
+          "name": `${conversation_name}`
         },
       ]
     } else if(step_1 === -1 && dtmf === -1) {
@@ -210,6 +237,7 @@ function createApp(config){
     }
 
   if(currentNcco !== null){
+      logger.info({ncco: currentNcco, originalUrl}, 'NCCO')
       return res.json(currentNcco);
     } else {
       res.status(400)
@@ -291,12 +319,13 @@ function generateToken({private_key, application_id, acl, sub}){
       }
     }
   }
-
+  const offset = 100000000
   const props = {
-    "iat": 1556839380,
-    "nbf": 1556839380,
-    "exp": 1559839410,
-    "jti": 1556839410008,
+    "iss": application_id,
+    "iat": Math.floor(Date.now() / 1000) - 30,
+    "nbf": Math.floor(Date.now() / 1000) - 30,
+    "exp": Math.floor(Date.now() / 1000) + 30000,
+    "jti": Date.now(),
     application_id,
     acl,
     sub

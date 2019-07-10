@@ -115,7 +115,7 @@ function generateLeafNCCO(conversation_name, text){
         "action": "talk",
         "text": `${text}`,
         "voiceName": "Amy",
-        "bargeIn": true
+        "bargeIn": false
     }
 
   ]

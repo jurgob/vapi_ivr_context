@@ -50,7 +50,6 @@ function createApp(config){
 
   app.get('/conversations', (req, res) => {
     const TOKEN_BE = generateBEToken({config})
-    console.log('TOKEN_BE', TOKEN_BE)
     return forwardNexmoReq(res)(axios({
       method:"GET",
       url:"https://api.nexmo.com/beta/conversations",
@@ -60,6 +59,30 @@ function createApp(config){
     }))
 
   })
+
+    app.get('/conversations/:conv_id', (req, res) => {
+      const {conv_id} = req.params;
+      const TOKEN_BE = generateBEToken({config})
+      return forwardNexmoReq(res)(axios({
+        method:"GET",
+        url: `https://api.nexmo.com/beta/conversations/${conv_id}`,
+        headers:{
+          "Authorization": `Bearer ${TOKEN_BE}`
+        }
+      }))
+    })
+
+      app.get('/conversations/:conv_id/events', (req, res) => {
+        const {conv_id} = req.params;
+        const TOKEN_BE = generateBEToken({config})
+        return forwardNexmoReq(res)(axios({
+          method:"GET",
+          url: `https://api.nexmo.com/beta/conversations/${conv_id}/events`,
+          headers:{
+            "Authorization": `Bearer ${TOKEN_BE}`
+          }
+        }))
+      })
 
   app.delete('/conversations/:conv_id', (req, res) => {
     const {conv_id} = req.params;
@@ -166,8 +189,8 @@ function createApp(config){
           logger.info({data, status}, `NCCO UPDATE SUCCESS!`)
         })
         .catch((err) => {
-          const {data, status} = err
-          logger.error({err}, `NCCO UPDATE FAILED!`)
+          const toLog = err.statusCode ? {statusCode: err.statusCode, message: err.message} : {err}
+          logger.error(toLog, `NCCO UPDATE FAILED!`)
         })
 
       }
@@ -201,7 +224,7 @@ function createApp(config){
     let {originalUrl, params, query} = req;
     let {step_1} = params;
     const {to='unknown', from='unknown', dtmf = -1 } = query;
-    
+
     if(step_1 === null || step_1 === undefined || step_1 === "" ){
       step_1 = -1
     } if (step_1 === "redirect"){
@@ -209,8 +232,8 @@ function createApp(config){
     } else {
       step_1 = parseInt(step_1)
     }
-    
-    logger.info({dtmf: dtmf, step_1_pre: step_1}, "ncco handler: ")
+
+    logger.info({dtmf: dtmf, step_1: step_1}, "ncco handler: ")
 
     const conversation_name = `nexmo_conversation__${to}___${from}`
 

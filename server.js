@@ -7,6 +7,8 @@ const {scenarios,generateNccoMap} = require('./test_ncco_build');
 const logger = bunyan.createLogger({name: 'myapp'});
 const dataService = require('./data_service')();
 const csClient = require('./cs_client')({logger})
+const { base64encode } = require('nodejs-base64');
+
 
 
 
@@ -276,28 +278,23 @@ function createApp(config){
   return app;
 }
 
-
-
-
 function localDevSetup({config}){
 
   const ngrok = require('ngrok');
-
-  dotenv.config();
-
-  const {port, application_id} = config;
-  const {MY_NEXMO_APP_API_KEY,MY_NEXMO_APP_API_SECRET} = process.env
-  const dev_api_token = new Buffer(`${MY_NEXMO_APP_API_KEY}:${MY_NEXMO_APP_API_SECRET}`).toString('base64')
-
   let NGROK_URL;
+  const {port, application_id, nexmo_account, application_name} = config;
+  const {api_key, api_secret } = nexmo_account;
+  const dev_api_token = base64encode(`${api_key}:${api_secret}`)
+
+
   return ngrok.connect(port)
     .then((ngrok_url ) => {
     NGROK_URL = ngrok_url;
     return axios({
       method: "PUT",
-      url: `https://api.nexmo.com/v2/applications/0443e6fd-f839-4377-999f-07fa193280cf`,
+      url: `https://api.nexmo.com/v2/applications/${application_id}`,
       data:{
-      	"name":"ivr-state-test",
+      	"name":application_name,
       	"capabilities": {
               "voice": {
                   "webhooks": {
@@ -382,17 +379,36 @@ function generateBEToken({config}){
     })
 }
 
-function getStaticConfig(env){
-  const {MY_NEXMO_APP_PRIVATE_KEY, MY_NEXMO_APP_APPLICATION_ID,MY_NEXMO_APP_PHONE_NUMBER} = env
-  const port  = 3000
-  return {
+function getStaticConfig(env) {
+  const isDev = !env.NODE_ENV
+  if(isDev)
+    dotenv.config();
+  const { MY_NEXMO_APP_PRIVATE_KEY, MY_NEXMO_APP_APPLICATION_ID, MY_NEXMO_APP_APPLICATION_NAME, MY_NEXMO_APP_PHONE_NUMBER } = env
+  const port = 5000
+
+  let config = {
     port,
+    isDev,
     phone_number: MY_NEXMO_APP_PHONE_NUMBER,
     server_url_internal: `http://localhost:${port}`,
     server_url: `http://localhost:${port}`,
-    private_key:MY_NEXMO_APP_PRIVATE_KEY,
-    application_id: MY_NEXMO_APP_APPLICATION_ID
+    private_key: MY_NEXMO_APP_PRIVATE_KEY,
+    application_id: MY_NEXMO_APP_APPLICATION_ID,
+    application_name:MY_NEXMO_APP_APPLICATION_NAME
   }
+  if(isDev) {
+      const { MY_NEXMO_APP_API_KEY, MY_NEXMO_APP_API_SECRET } = env
+      config = {
+        ...config,
+        nexmo_account: {
+          api_key:MY_NEXMO_APP_API_KEY,
+          api_secret: MY_NEXMO_APP_API_SECRET
+        }
+      }
+  }
+
+
+  return config
 }
 
 function listenServer({app, config}){
@@ -420,5 +436,33 @@ function startServer(){
     })
 }
 
-startServer()
-  .catch(err => console.error(err))
+function checkEnvVars(){
+  const isDev = !process.env.NODE_ENV
+  if(isDev)
+    dotenv.config();
+
+  let mandatoryEnvs = ["MY_NEXMO_APP_PRIVATE_KEY", "MY_NEXMO_APP_APPLICATION_ID", "MY_NEXMO_APP_APPLICATION_NAME", "MY_NEXMO_APP_API_KEY"]
+  if(isDev)
+    mandatoryEnvs = mandatoryEnvs.concat(["MY_NEXMO_APP_API_KEY", "MY_NEXMO_APP_API_SECRET"])
+
+
+  const getEmpty = (acc, cur) => {
+    if(!process.env[cur]) {
+      return [...acc, cur]
+    } else {
+      return acc
+    }
+  }
+
+  const emptyEnvs = mandatoryEnvs
+    .reduce(getEmpty, [])
+  return emptyEnvs
+}
+
+const  emptyEnvs = checkEnvVars();
+if(emptyEnvs.length)
+  logger.error(`you need to configure the following vars`, emptyEnvs)
+else
+  startServer()
+    .catch(err => console.error(err))
+
